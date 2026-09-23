@@ -1,4 +1,4 @@
 spring:
   application:
-    name: mcpserver
+    name: database_mcp_tools_server
 
