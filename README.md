@@ -8,11 +8,11 @@ MCP（Model Context Protocol）数据库工具基座服务：MCP 客户端（AI 
 
 ```bash
 # 编译
-D:\maven\apache-maven-3.9.16\bin\mvn.cmd -q clean compile
+mvn -q clean compile
 # 启动（默认 pass 模式）
-D:\maven\apache-maven-3.9.16\bin\mvn.cmd spring-boot:run
+mvn spring-boot:run
 # 启动（deny 模式，联调灰度封禁）
-D:\maven\apache-maven-3.9.16\bin\mvn.cmd spring-boot:run "-Dspring-boot.run.jvmArguments=-Dmcp.auth.mode=deny"
+mvn spring-boot:run "-Dspring-boot.run.jvmArguments=-Dmcp.auth.mode=deny"
 ```
 
 ---
@@ -24,7 +24,7 @@ D:\maven\apache-maven-3.9.16\bin\mvn.cmd spring-boot:run "-Dspring-boot.run.jvmA
 本框架做 **调用方鉴权（caller-side auth）**：校验"谁有权调用这个 MCP 服务"，
 保护 MCP 端点不被任意第三方直接访问。
 
-**边界说明**：MCP 协议本身无法识别终端用户是谁（用户身份只能由智能体通过
+**职责边界**：MCP 协议本身无法识别终端用户是谁（用户身份只能由智能体通过
 工具参数 / 请求头透传，如 `@Header("user")` 或工具参数里的 `userId`）。
 用户级的授权与审计属于**工具层职责**，不在 Auth 包范围内。
 
@@ -36,19 +36,20 @@ HTTP 请求
   ▼
 Spring Tomcat（8080）
   │
-  ├─ SolonServletFilter（FilterRegistrationBean 桥接 /mcp/*、/sse/*）
+  ├─ SolonServletFilter（FilterRegistrationBean 桥接 /mcp/*、/sse/* 到 Solon 容器）
   │
   ▼
 Solon 容器 FilterChain
   │
-  ├─ McpAuthFilter（token 校验，先于 MCP 协议帧解析）
-  │     不通过 → 写 401/403 + setHandled(true) → 链路终止，MCP 协议层不可见未授权请求
+  ├─ McpAuthFilter（Solon Filter，token 校验，先于 MCP 协议帧解析）
+  │     不通过 → ctx.status(401/403) + output + setHandled(true) → 链路终止，
+  │             MCP 协议层不可见未授权请求
   │
   ▼
 MCP 端点（@McpServerEndpoint + @ToolMapping 工具方法）
 ```
 
-MCP 客户端调用示例：
+MCP 客户端调用示例（Streamable Stateless）：
 
 ```
 POST http://host:8080/mcp/database-tools
@@ -63,18 +64,23 @@ Authorization: Bearer <token>
 
 ```
 com.chaoxing.mcpserver.auth
-├── TokenVerifier.java          校验核心接口：verify(String token, Context ctx)
-├── TokenExtractor.java         提取接口：extract(Context ctx)
-├── TokenVerificationResult.java 结果值对象（401/403 语义 + claims 扩展点）
+├── TokenVerifier.java            校验核心接口：verify(String token, Context ctx)
+├── TokenExtractor.java           提取接口：extract(Context ctx)
+├── TokenVerificationResult.java  结果值对象（401/403 语义 + claims 扩展点）
 ├── filter/
-│   └── McpAuthFilter.java      Solon Filter，拦截 /mcp/*、/sse/*（挂载层，稳定不动）
+│   └── McpAuthFilter.java        Solon Filter，拦截 /mcp/*、/sse/*（挂载层，稳定不动）
 ├── impl/
-│   ├── NoopTokenVerifier.java  空置默认实现（pass / deny / custom 三模式）
+│   ├── NoopTokenVerifier.java    空置默认实现（pass / deny / custom 三模式）
 │   └── DefaultTokenExtractor.java  Bearer 头 → X-Auth-Token 头 → ?token= 查询串
 └── config/
-    ├── AuthConfiguration.java  Bean 装配（TokenExtractor + TokenVerifier + AuthProperties）
-    ├── AuthProperties.java     绑定 mcp.auth.* 配置
-    └── AuthMode.java           pass | deny | custom 枚举
+    ├── AuthConfiguration.java    Bean 装配（TokenExtractor + TokenVerifier + AuthProperties）
+    ├── AuthProperties.java       绑定 mcp.auth.* 配置（@EnableConfigurationProperties）
+    └── AuthMode.java            pass | deny | custom 枚举
+
+com.chaoxing.mcpserver.mcp
+├── McpServerConfig.java          Solon.start() + app.router().filter(McpAuthFilter)
+│                                 + 手动构建端点 provider + 注册 SolonServletFilter
+└── McpDatabaseToolsEndpoint.java 首个端点（占位 ping 工具），后续数据库工具在此扩展
 ```
 
 ## 四、配置契约
@@ -83,11 +89,11 @@ com.chaoxing.mcpserver.auth
 # application.yml
 mcp:
   auth:
-    mode: pass              # pass（默认，空置放行）| deny（空置拒绝）| custom（委托自定义实现）
-    custom-verifier-bean: "" # mode=custom 时，指定目标 TokenVerifier Bean 名
+    mode: pass                # pass（默认，空置放行）| deny（空置拒绝）| custom（委托自定义实现）
+    custom-verifier-bean: ""  # mode=custom 时，指定目标 TokenVerifier Bean 名
 ```
 
-运行时也可用 JVM 参数覆盖：`-Dmcp.auth.mode=deny`。
+运行时可用 JVM 参数覆盖：`-Dmcp.auth.mode=deny`。
 
 ### 行为矩阵
 
@@ -112,6 +118,8 @@ mcp:
 
 **Step 1 — 新增 TokenVerifier 实现类**
 
+放在 `com.chaoxing.mcpserver` 包下（Spring 组件扫描范围），加 `@Component` 注册为 Bean：
+
 ```java
 package com.chaoxing.mcpserver.auth.impl;
 
@@ -119,6 +127,8 @@ import com.chaoxing.mcpserver.auth.TokenVerificationResult;
 import com.chaoxing.mcpserver.auth.TokenVerifier;
 import org.noear.solon.core.handle.Context;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /** 甲方提供的加密/签名校验逻辑（示例骨架）。 */
 @Component
@@ -144,9 +154,9 @@ public class CryptoTokenVerifier implements TokenVerifier {
 }
 ```
 
-注意：
-- 实现类必须放在 `com.chaoxing.mcpserver` 包下（Spring 组件扫描范围），加 `@Component` 注册为 Bean
+要点：
 - `TokenVerificationResult` 工厂方法：`pass()` / `pass(claims)` / `unauthorized(reason)` / `forbidden(reason)`
+- `Context` 是扩展点：实现方可读取 `ctx.header(...)` / `ctx.param(...)` / `ctx.pathNew()` 等元数据
 - reason 会出现在 WARN 日志与 401/403 响应体中，**禁止包含 token 明文**
 
 **Step 2 — 切换配置**
@@ -160,10 +170,7 @@ mcp:
 
 **Step 3 — 验证**
 
-```bash
-# 启动后：
-# 不带 token → 401；带合法 token → 200 tools 列表；带非法 token → 401/403
-```
+启动后：不带 token → 401；带合法 token → 200 tools 列表；带非法 token → 401/403。
 
 `NoopTokenVerifier` 的 CUSTOM 分支通过 `beanFactory.isTypeMatch(beanName, TokenVerifier.class)`
 精确解析目标 Bean 并委托校验；Bean 不存在或类型不符时拒绝请求并打 WARN/ERROR。
@@ -179,7 +186,9 @@ mcp:
 
 ## 七、已知约束
 
-- 端点路径固定在 `/mcp/*`、`/sse/*`（SolonServletFilter URL 模式）
+- 端点路径固定在 `/mcp/*`、`sse/*`（SolonServletFilter URL 模式）
 - 端点 channel = STREAMABLE_STATELESS（集群友好，无 session）
 - Solon 扫描禁用（`enableScanning(false)`），MCP 端点必须通过 Spring Bean 手动构建
+- `McpAuthFilter` 的 `TokenVerifier`/`TokenExtractor` 是 Spring Bean，由 `McpServerConfig`
+  构造器注入后手动 `new McpAuthFilter(...)` 传入 Solon FilterChain
 - DataSource 当前为占位配置（`127.0.0.1:3306/mcp_tools`），甲方连接信息到位后替换
