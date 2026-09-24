@@ -1,0 +1,5 @@
+# Solon 容器独立配置（仅 Solon.start 读取，不影响 Spring 侧）
+# server.port 未声明：项目使用 solon-web-servlet-jakarta 嵌入模式，
+# MCP 端点跑在 Spring Boot 的 Tomcat（默认 8080）上，Solon 不单独起 web 服务。
+server:
+  contextPath: /

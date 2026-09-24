@@ -2,3 +2,33 @@ spring:
   application:
     name: database_mcp_tools_server
 
+# ---------------------------------------------------------------------------
+# DataSource 占位配置（MCP 基座框架阶段）
+# 甲方数据库连接信息未到位，database-spring-boot-starter 的自动配置
+# 需要 url/driver 才能创建 HikariDataSource；此处用本地 MySQL 占位值。
+# 占位池不实际建连接（initialization-fail-timeout=-1、minimum-idle=0），
+# 连不上库也不会阻塞应用启动；真实接入时替换 url/username/password。
+# ---------------------------------------------------------------------------
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/mcp_tools?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: root
+    hikari:
+      pool-name: McpPlaceholderPool
+      maximum-pool-size: 2
+      minimum-idle: 0
+      initialization-fail-timeout: -1
+      connection-timeout: 5000
+
+# ---------------------------------------------------------------------------
+# MCP Auth 框架配置（调用方鉴权）
+# mode:
+#   pass   = 空置放行（默认，甲方加密逻辑未到位期间）
+#   deny   = 空置拒绝（灰度封禁）
+#   custom = 委托 custom-verifier-bean 指定的 TokenVerifier 实现（甲方逻辑落地后切这里）
+# ---------------------------------------------------------------------------
+mcp:
+  auth:
+    mode: pass
+    custom-verifier-bean: ""
