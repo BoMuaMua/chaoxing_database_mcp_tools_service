@@ -186,4 +186,5 @@ spring:
   解 cause 链还原 `SQLException` 再交给 `DbExceptionMapper`，业务层不会拿到 Gaarason 原始异常
 - DataSource 当前为占位配置（`127.0.0.1:3306/mcp_tools`），甲方连接信息到位后替换
   `spring.datasource.*`（url/username/password），**池参数无需改动**（已收敛到 `spring.datasource.hikari.*`）
-- 只读 SQL 工具是白名单（SELECT/WITH）+ 关键字黑名单防护；写类工具（INSERT/UPDATE/DDL）需另加确认/白名单机制，不在本端点默认放行
+- 只读 SQL 工具是白名单（SELECT/WITH）+ 关键字黑名单防护；**写类/DDL 工具已移除**（基座纯查询，
+  需另加确认/白名单/审计机制后另行设计）；查询类走 `config.gaarason` 包（Gaarason 数据源通道）
