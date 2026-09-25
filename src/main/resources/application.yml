@@ -32,3 +32,14 @@ mcp:
   auth:
     mode: pass
     custom-verifier-bean: ""
+
+  # ---------------------------------------------------------------------------
+  # MCP 数据库工具配置
+  # readonly-enabled          只读查询工具总开关
+  # max-rows                  单次查询最大返回行数（超出截断并标注 truncated=true）
+  # statement-timeout-seconds 单条语句超时（秒，<=0 不限制）
+  # ---------------------------------------------------------------------------
+  db:
+    readonly-enabled: true
+    max-rows: 200
+    statement-timeout-seconds: 30
