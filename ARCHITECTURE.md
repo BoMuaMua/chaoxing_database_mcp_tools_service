@@ -178,6 +178,12 @@ spring:
 - 端点 channel = STREAMABLE_STATELESS（集群友好，无 session）
 - Solon 扫描禁用（`enableScanning(false)`），MCP 端点必须通过 Spring Bean 手动构建
 - `McpAuthFilter` 的 `TokenVerifier`/`TokenExtractor` 是 Spring Bean，由 `McpServerConfig` 构造器注入后手动 `new` 传入 Solon FilterChain
-- 连接池：Spring Boot 自动配置 `HikariDataSource`（读 `spring.datasource.*`）；Gaarason starter 的 `GaarasonDataSource`（@Primary）包装它做路由；`ConnectionProvider` 注入 `GaarasonDataSource` 对外暴露 `getConnection()`
-- DataSource 当前为占位配置（`127.0.0.1:3306/mcp_tools`），甲方连接信息到位后替换 `spring.datasource.*`
+- 连接池：Spring Boot 自动配置 `HikariDataSource`（读 `spring.datasource.hikari.*`，池参数统一收敛于此）；
+  Gaarason starter 的 `GaarasonDataSource`（@Primary）包装它做路由；`ConnectionProvider` 注入 `GaarasonDataSource`，
+  对外暴露唯一 `getConnection()`（业务方不读池参数）
+- **已知坑**：Gaarason 数据源包装器取连接失败抛 `gaarason.database.exception.SQLRuntimeException`
+  （cause 里包着底层 `SQLException`），不是 `SQLException`。`ConnectionProvider` 已处理：
+  解 cause 链还原 `SQLException` 再交给 `DbExceptionMapper`，业务层不会拿到 Gaarason 原始异常
+- DataSource 当前为占位配置（`127.0.0.1:3306/mcp_tools`），甲方连接信息到位后替换
+  `spring.datasource.*`（url/username/password），**池参数无需改动**（已收敛到 `spring.datasource.hikari.*`）
 - 只读 SQL 工具是白名单（SELECT/WITH）+ 关键字黑名单防护；写类工具（INSERT/UPDATE/DDL）需另加确认/白名单机制，不在本端点默认放行
