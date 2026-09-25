@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  */
 public final class ReadonlySqlGuard {
 
-    /** 写/DDL 危险关键字（作为独立词出现即拒绝；覆盖 CTE 体内夹带写操作的情形）。 */
+    /** 写/DDL 危险关键字（在只读语句中作为独立词出现即拒绝）。 */
     private static final Pattern DANGEROUS_KEYWORDS = Pattern.compile(
             "\\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|RENAME|CALL|LOAD|REPLACE|MERGE)\\b",
             Pattern.CASE_INSENSITIVE);

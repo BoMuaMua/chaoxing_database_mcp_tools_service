@@ -1,7 +1,11 @@
 package com.chaoxing.mcpserver.mcp;
 
+import com.chaoxing.mcpserver.common.exception.DbException;
+import com.chaoxing.mcpserver.common.result.Result;
 import com.chaoxing.mcpserver.db.DbQueryService;
 import com.chaoxing.mcpserver.db.UnsafeSqlException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.noear.solon.ai.annotation.ToolMapping;
 import org.noear.solon.ai.mcp.McpChannel;
@@ -9,8 +13,6 @@ import org.noear.solon.ai.mcp.server.IMcpServerEndpoint;
 import org.noear.solon.ai.mcp.server.annotation.McpServerEndpoint;
 import org.noear.solon.annotation.Param;
 import org.springframework.stereotype.Service;
-
-import java.sql.SQLException;
 
 /**
  * 数据库工具 MCP 服务端点（首个端点）。
@@ -28,9 +30,15 @@ import java.sql.SQLException;
  * 后续数据库工具（写操作、DDL、迁移等）在此类下扩展；
  * 写类工具需另加确认/白名单机制，不在本端点默认放行。
  * </p>
+ * <p>
+ * 响应统一走 {@link Result} 包装：成功 {@code {success:true,code:0,data:...}}；
+ * 失败 {@code {success:false,code:10xx/20xx/40xx,message:...}}。
+ * 工具方法捕获 {@link DbException}（不读 SQLState），序列化 {@link Result#toMap()} 返回。
+ * </p>
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 @McpServerEndpoint(
         channel = McpChannel.STREAMABLE_STATELESS,
         name = "database-tools",
@@ -39,10 +47,7 @@ import java.sql.SQLException;
 public class McpDatabaseToolsEndpoint implements IMcpServerEndpoint {
 
     private final DbQueryService dbQueryService;
-
-    public McpDatabaseToolsEndpoint(DbQueryService dbQueryService) {
-        this.dbQueryService = dbQueryService;
-    }
+    private final ObjectMapper objectMapper;
 
     /**
      * 占位工具：验证 MCP 节点可被调用。
@@ -61,28 +66,33 @@ public class McpDatabaseToolsEndpoint implements IMcpServerEndpoint {
      * </p>
      *
      * @param sql 只读 SQL（如 {@code SELECT id, name FROM users WHERE id = 1}）
-     * @return JSON 字符串：成功为 {@code {"rowCount":N,"truncated":bool,"data":[{...}]}}；
-     *         失败为 {@code {"error":"...","message":"..."}}（不抛异常给 MCP 层）
+     * @return {@link Result} 的 JSON 字符串（MCP 工具方法返回 String，调用方解析）
      */
     @ToolMapping(description = "执行只读 SQL 查询（仅限 SELECT/WITH，单语句，结果 JSON 化；超出行数截断）")
     public String executeReadonlySql(@Param(description = "只读 SQL 语句，如 SELECT ... FROM ...") String sql) {
         try {
             var result = dbQueryService.executeReadonly(sql);
-            return dbQueryService.toJson(result);
+            // 成功：Result 包装后序列化（MCP 工具方法返回 String）
+            return writeJson(Result.ok(result));
         } catch (UnsafeSqlException e) {
             log.warn("[db] readonly sql rejected: sql={}, reason={}", sql, e.getMessage());
-            return "{\"error\":\"unsafe_sql\",\"message\":\"" + escapeJson(e.getMessage()) + "\"}";
-        } catch (SQLException e) {
-            log.error("[db] readonly sql failed: sql={}", sql, e);
-            return "{\"error\":\"db_error\",\"message\":\"" + escapeJson(e.getMessage()) + "\"}";
+            return writeJson(Result.fail(
+                    com.chaoxing.mcpserver.common.exception.ErrorCode.TOOL_UNSAFE_SQL.getCode(),
+                    e.getMessage()));
+        } catch (DbException e) {
+            // 业务层只 catch DbException（不读 SQLState）
+            log.error("[db] readonly sql failed: code={}, safeMessage={}", e.getCode(), e.getSafeMessage());
+            return writeJson(Result.fromDbException(e));
         }
     }
 
-    private static String escapeJson(String s) {
-        if (s == null) {
-            return "";
+    /** 统一序列化 Result → JSON 字符串（MCP 工具方法返回 String；吞掉序列化异常，保证永不抛出）。 */
+    private String writeJson(Result<?> result) {
+        try {
+            return objectMapper.writeValueAsString(result.toMap());
+        } catch (Exception e) {
+            log.error("[mcp] failed to serialize Result", e);
+            return "{\"success\":false,\"code\":-1,\"message\":\"internal serialization error\"}";
         }
-        return s.replace("\\", "\\\\").replace("\"", "\\\"")
-                .replace("\n", " ").replace("\r", " ").replace("\t", " ");
     }
 }

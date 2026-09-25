@@ -4,10 +4,13 @@ spring:
 
 # ---------------------------------------------------------------------------
 # DataSource 占位配置（MCP 基座框架阶段）
-# 甲方数据库连接信息未到位，database-spring-boot-starter 的自动配置
-# 需要 url/driver 才能创建 HikariDataSource；此处用本地 MySQL 占位值。
+# JDBC URL / 账号 / 密码 由 spring.datasource.* 提供；
+# 连接池参数统一收敛到 spring.datasource.hikari.*（HikariCP），
+# 业务代码只注入 config.pool.ConnectionProvider（对外一个 getConnection()），
+# 不直接读池参数。
+# 甲方数据库连接信息未到位：用本地 MySQL 占位值，真实接入时替换 url/username/password。
 # 占位池不实际建连接（initialization-fail-timeout=-1、minimum-idle=0），
-# 连不上库也不会阻塞应用启动；真实接入时替换 url/username/password。
+# 连不上库也不会阻塞应用启动。
 # ---------------------------------------------------------------------------
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/mcp_tools?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
@@ -15,11 +18,14 @@ spring:
     username: root
     password: root
     hikari:
-      pool-name: McpPlaceholderPool
-      maximum-pool-size: 2
+      pool-name: McpDatabasePool
+      maximum-pool-size: 10
       minimum-idle: 0
-      initialization-fail-timeout: -1
       connection-timeout: 5000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      connection-test-query: "SELECT 1"
+      initialization-fail-timeout: -1
 
 # ---------------------------------------------------------------------------
 # MCP Auth 框架配置（调用方鉴权）
